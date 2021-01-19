@@ -258,13 +258,22 @@ class TaskContext:
        
        Not available outside of a task, may only be used while a task is executing.
         
-    .. py:attribute:: oudated_outputs
+    .. py:attribute:: outdated_outputs
     
         All out of date file outputs, or an empty list
         
        **Note:** 
        
        Not available outside of a task, may only be used while a task is executing.
+
+    .. py:attribute:: sym_io
+    
+        (Default empty) set of symlink deps for which lstat is used to get mod time.
+
+       **Note:** 
+       
+       Memebrs of this set must be symlinks.
+        
     """
 
     def __init__(self, pake_obj, node):
@@ -282,6 +291,8 @@ class TaskContext:
         self.outputs = []
         self.outdated_inputs = []
         self.outdated_outputs = []
+        self.sym_io = set() # symlink mtime (lstat, not stat) is used for paths in this set.
+
 
     @property
     def io_lock(self):
@@ -1474,7 +1485,8 @@ class Pake:
             self._run_count += 1
 
     @staticmethod
-    def _change_detect(task_name, i, o):
+    def _change_detect(task_name, i, o, sym_io=set()):
+
         len_i = len(i)
         len_o = len(o)
 
@@ -1490,17 +1502,17 @@ class Pake:
         if len_o > 1:
             Pake._change_detect_multiple_outputs(task_name, i, o,
                                                  outdated_inputs,
-                                                 outdated_outputs)
+                                                 outdated_outputs, sym_io=sym_io)
 
         else:
             Pake._change_detect_single_output(task_name, i, o,
                                               outdated_inputs,
-                                              outdated_outputs)
+                                              outdated_outputs, sym_io=sym_io)
 
         return outdated_inputs, outdated_outputs
 
     @staticmethod
-    def _change_detect_single_output(task_name, i, o, outdated_inputs, outdated_outputs):
+    def _change_detect_single_output(task_name, i, o, outdated_inputs, outdated_outputs, sym_io=set()):
         output_object = o[0]
 
         if not path.exists(output_object):
@@ -1515,7 +1527,7 @@ class Pake:
             for input_object in i:
                 if not path.exists(input_object):
                     raise InputNotFoundException(task_name, input_object)
-                if pake.util.is_more_recent(input_object, output_object):
+                if pake.util.is_more_recent(input_object, output_object, sym_io=sym_io):
                     outdated_inputs.append(input_object)
                     outdated_output = output_object
 
@@ -1523,7 +1535,7 @@ class Pake:
                 outdated_outputs.append(outdated_output)
 
     @staticmethod
-    def _change_detect_multiple_outputs(task_name, i, o, outdated_inputs, outdated_outputs):
+    def _change_detect_multiple_outputs(task_name, i, o, outdated_inputs, outdated_outputs, sym_io=set()):
         len_i = len(i)
         len_o = len(o)
 
@@ -1540,7 +1552,7 @@ class Pake:
                 if not path.exists(input_object):
                     raise InputNotFoundException(task_name, input_object)
                 for output_object in o:
-                    if not path.exists(output_object) or pake.util.is_more_recent(input_object, output_object):
+                    if not path.exists(output_object) or pake.util.is_more_recent(input_object, output_object, sym_io=sym_io):
                         input_set.add(input_object)
                         output_set.add(output_object)
 
@@ -1551,11 +1563,11 @@ class Pake:
             for input_object, output_object in zip(i, o):
                 if not path.exists(input_object):
                     raise InputNotFoundException(task_name, input_object)
-                if not path.exists(output_object) or pake.util.is_more_recent(input_object, output_object):
+                if not path.exists(output_object) or pake.util.is_more_recent(input_object, output_object, sym_io=sym_io):
                     outdated_inputs.append(input_object)
                     outdated_outputs.append(output_object)
 
-    def task(self, *args, i=None, o=None, show_header=None):
+    def task(self, *args, i=None, o=None, show_header=None, sym_io=set()):
         """
         Decorator for registering pake tasks.
         
@@ -1730,12 +1742,14 @@ class Pake:
                             **False**, it will force the task header to print anyway.  By explicitly specifying **True** you
                             override the :py:attr:`pake.Pake.show_task_header` setting.
 
+        :param sym_io: Set of input/ouput symlinks whose mod time is got using lstat.
+
         """
 
         if len(args) == 1 and inspect.isfunction(args[0]):
             if args[0].__name__ not in self._task_contexts:
                 func = args[0]
-                self.add_task(func.__name__, func, show_header=show_header)
+                self.add_task(func.__name__, func, show_header=show_header, sym_io=sym_io)
                 return func
 
         if len(args) == 1 and pake.util.is_iterable_not_str(args[0]):
@@ -1819,7 +1833,7 @@ class Pake:
             return True
 
         i, o = Pake._process_i_o_params(inputs, outputs)
-        outdated_inputs, outdated_outputs = Pake._change_detect(ctx.name, i, o)
+        outdated_inputs, outdated_outputs = Pake._change_detect(ctx.name, i, o, sym_io=ctx.sym_io)
 
         ctx.inputs = list(i)
         ctx.outputs = list(o)
@@ -1831,7 +1845,7 @@ class Pake:
 
         return False
 
-    def add_task(self, name, func, dependencies=None, inputs=None, outputs=None, show_header=None):
+    def add_task(self, name, func, dependencies=None, inputs=None, outputs=None, show_header=None, sym_io=set()):
         """
         Method for programmatically registering pake tasks.
         
@@ -1900,6 +1914,8 @@ class Pake:
                             If you specify **True** and :py:attr:`pake.Pake.show_task_header` is set to **False**, it will force the task header to print
                             anyway.  By explicitly specifying **True** you override :py:attr:`pake.Pake.show_task_header`.
 
+        :param sym_io: Set of input/ouput symlinks whose mod time is got using lstat.
+
         :return: The :py:class:`pake.TaskContext` for the new task.
 
 
@@ -1952,6 +1968,8 @@ class Pake:
             task_context = TaskContext(self, TaskGraph(name, _add_ctx_param_stub))
         else:
             task_context = TaskContext(self, TaskGraph(name, func_wrapper))
+
+        task_context.sym_io = sym_io
 
         self._task_contexts[name] = task_context
 

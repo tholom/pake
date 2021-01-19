@@ -313,14 +313,25 @@ def copyfileobj_tee(fsrc, destinations, length=16 * 1024, readline=False):
             fdst.write(buf)
 
 
-def is_more_recent(input, output):
+def l_modt(f):
+  assert pathlib.Path(f).is_symlink()
+  return os.lstat(f).st_mtime
+
+def f_in(f, s):
+  for F in s:
+    if pathlib.Path(F).samefile(f): return True
+  return False
+
+def is_more_recent(input, output, sym_io=set()):
     """
     Check if an (input) file/directory has a more recent modification time than an (output) file/directory.
 
     :param input: Path to a file or directory
     :param output: Path to a file or directory
+    :param sym_io: For files in this set, use symlink mod time (via lstat) for input.
     :return: **True** if **input** is more recent than **output**, else **False**
 
     """
-
-    return path.getmtime(input) > path.getmtime(output)
+    i_mtime = f_in( input, sym_io) and l_modt(input)  or path.getmtime(input)
+    o_mtime = f_in(output, sym_io) and l_modt(output) or path.getmtime(output)
+    return i_mtime > o_mtime
