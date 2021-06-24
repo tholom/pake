@@ -744,7 +744,7 @@ def terminate(pake_obj, return_code=returncodes.SUCCESS):  # pragma: no cover
         _terminate(pake_obj, return_code, exit_func=m_exit)
 
 
-def _terminate(pake_obj, return_code, exit_func=exit):
+def _terminate(pake_obj, return_code, exit_func=sys.exit):
     """
 
     :type pake_obj: pake.Pake
